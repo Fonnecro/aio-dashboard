@@ -171,6 +171,7 @@ function buildDashboardData(scanSetId) {
         sentiment: s.sentiment,
         share_of_voice: s.sov,
         by_category: byCategory,
+        prompts: s.prompts || [],
       };
     } else {
       platforms[pk] = {
@@ -180,6 +181,7 @@ function buildDashboardData(scanSetId) {
         sentiment: { positive: 0, neutral: 0, negative: 0 },
         share_of_voice: [],
         by_category: {},
+        prompts: [],
       };
     }
   }
@@ -330,7 +332,9 @@ export default function AIODashboard() {
 
   const crossPlatform = platformKeys.map((k) => {
     const p = d.platforms[k];
-    const total = p.sentiment.positive + p.sentiment.neutral + p.sentiment.negative;
+    const allRuns = (p.prompts || []).flatMap(pr => pr.runs);
+    const mentioned = allRuns.filter(r => r.tm);
+    const firstCount = mentioned.filter(r => r.tr === 1).length;
     return {
       platform: PLATFORMS[k].label,
       key: k,
@@ -338,7 +342,7 @@ export default function AIODashboard() {
       mention_rate: p.mention_rate,
       avg_position: p.avg_position,
       sov_rank: p.share_of_voice.length > 0 ? p.share_of_voice.findIndex((s) => s.is_target) + 1 : null,
-      positive_pct: total > 0 ? Math.round(p.sentiment.positive / total * 100) : null,
+      first_pct: mentioned.length > 0 ? Math.round(firstCount / mentioned.length * 100) : null,
       pending: p.mention_rate === null,
     };
   });
@@ -414,7 +418,7 @@ function OverviewTab({ d, crossPlatform, scannedPlatforms, avgMention, bestPlatf
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <KPI icon="📡" label="平均提及率" value={`${avgMention}%`} sub={`${scannedPlatforms.length} 平台平均`} color={avgMention >= 50 ? C.green : C.amber} />
         <KPI icon="🏅" label="最佳平台" value={`${bestPlatform.mention_rate}%`} sub={bestPlatform.platform} color={C.brand} />
-        <KPI icon="👍" label="情感傾向" value={`${scannedPlatforms[0]?.positive_pct || 0}%`} sub="正面提及比例" color={C.green} />
+        <KPI icon="🥇" label="首位推薦率" value={`${scannedPlatforms[0]?.first_pct || 0}%`} sub="被提及時排第一的比例" color={C.green} />
         <KPI icon="⏳" label="待掃描平台" value={`${crossPlatform.length - scannedPlatforms.length}`} sub={crossPlatform.filter(p => p.pending).map(p => p.platform).join(" / ") || "無"} color={C.textDim} />
       </div>
 
@@ -443,7 +447,7 @@ function OverviewTab({ d, crossPlatform, scannedPlatforms, avgMention, bestPlatf
               <div style={{ width: 4, height: 40, borderRadius: 2, background: p.pending ? C.textDim : p.color, flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{p.platform}</div>
-                <div style={{ fontSize: 11, color: C.textDim }}>{p.pending ? "尚未掃描" : `排名 #${p.sov_rank} · 正面 ${p.positive_pct}%`}</div>
+                <div style={{ fontSize: 11, color: C.textDim }}>{p.pending ? "尚未掃描" : `排名 #${p.sov_rank} · 首位推薦 ${p.first_pct}%`}</div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace", color: p.pending ? C.textDim : p.mention_rate >= 70 ? C.green : p.mention_rate >= 50 ? C.amber : C.red }}>{p.pending ? "—" : `${p.mention_rate}%`}</div>
@@ -637,13 +641,28 @@ function PlatformTab({ d }) {
 
   if (!p || p.mention_rate === null) return <div style={{ color: C.textDim, padding: 20 }}>此平台尚未掃描</div>;
 
+  // Calculate mention counts from prompt data
+  const allRuns = (p.prompts || []).flatMap(pr => pr.runs);
+  const mentionedRuns = allRuns.filter(r => r.tm);
+  const totalRuns = allRuns.length;
+  const mentionedCount = mentionedRuns.length;
+
+  // Calculate rank distribution
+  const rankDist = { first: 0, top3: 0, later: 0, none: totalRuns - mentionedCount };
+  mentionedRuns.forEach(r => {
+    if (r.tr === 1) rankDist.first++;
+    else if (r.tr <= 3) rankDist.top3++;
+    else rankDist.later++;
+  });
+  const rankData = [
+    { name: "🥇 首位推薦", value: rankDist.first, fill: C.green },
+    { name: "🥈 前三推薦", value: rankDist.top3, fill: C.brand },
+    { name: "📋 有提及但排後段", value: rankDist.later, fill: C.amber },
+    { name: "❌ 未提及", value: rankDist.none, fill: C.textDim + "66" },
+  ].filter(d => d.value > 0);
+
   const sovData = p.share_of_voice.map((s) => ({ name: s.name, share: Math.round(s.share * 100) }));
   const catData = Object.entries(p.by_category).map(([name, val]) => ({ name: CAT_SHORT[name] || name, rate: val.rate || 0 }));
-  const sentData = [
-    { name: "正面", value: p.sentiment.positive, fill: C.green },
-    { name: "中性", value: p.sentiment.neutral, fill: C.amber },
-    { name: "負面", value: p.sentiment.negative, fill: C.red },
-  ];
 
   return (
     <>
@@ -667,7 +686,7 @@ function PlatformTab({ d }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 4 }}>
-        <KPI icon="📡" label="提及率" value={`${p.mention_rate}%`} color={p.mention_rate >= 70 ? C.green : p.mention_rate >= 50 ? C.amber : C.red} />
+        <KPI icon="📡" label="提及率" value={`${p.mention_rate}%`} sub={`${mentionedCount} / ${totalRuns} 次回覆`} color={p.mention_rate >= 70 ? C.green : p.mention_rate >= 50 ? C.amber : C.red} />
         <KPI icon="🏅" label="平均排名" value={`#${p.avg_position}`} color={pInfo.color} />
         <KPI icon="⚔️" label="聲量排名" value={`#${p.share_of_voice.findIndex((s) => s.is_target) + 1}`} sub={`/ ${p.share_of_voice.length} 品牌`} color={C.purple} />
       </div>
@@ -704,12 +723,13 @@ function PlatformTab({ d }) {
         </div>
       </Section>
 
-      <Section title="💬 情感分佈">
+      <Section title="🏅 品牌排名分佈">
+        <div style={{ fontSize: 11, color: C.textDim, marginBottom: 8 }}>當 AI 有提及品牌時，它在回覆中的推薦順位</div>
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "8px 0" }}>
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
-              <Pie data={sentData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={4} strokeWidth={0}>
-                {sentData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+              <Pie data={rankData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={4} strokeWidth={0}>
+                {rankData.map((e, i) => <Cell key={i} fill={e.fill} />)}
               </Pie>
               <Legend iconType="circle" wrapperStyle={{ fontSize: 11, color: C.textMuted }} />
               <Tooltip />
@@ -895,7 +915,7 @@ function ActionsTab({ d, crossPlatform }) {
         recs.push({
           priority: "P1", type: "platform_gap",
           title: `${p.platform} 提及率偏低（${p.mention_rate}%）`,
-          detail: `排名 #${p.sov_rank}，正面提及佔 ${p.positive_pct}%。`,
+          detail: `排名 #${p.sov_rank}，首位推薦率 ${p.first_pct}%。`,
           actions: [`強化品牌相關的結構化資料（Schema.org、FAQ）`, `產出更多權威內容`],
           color: C.amber, platform: p.key,
         });
