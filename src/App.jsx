@@ -324,8 +324,11 @@ const Tip = ({ active, payload, label }) => {
 
 // ─── Main ────────────────────────────────────────────
 export default function AIODashboard() {
+  const [authed, setAuthed] = useState(false);
+  const [pw, setPw] = useState("");
   const [tab, setTab] = useState("overview");
   const [scanSetId, setScanSetId] = useState("v4-all");
+  const PASS = "vocus2026";
 
   const d = useMemo(() => buildDashboardData(scanSetId), [scanSetId]);
   const platformKeys = Object.keys(d.platforms);
@@ -349,6 +352,32 @@ export default function AIODashboard() {
 
   const scannedPlatforms = crossPlatform.filter((p) => !p.pending);
   const avgMention = scannedPlatforms.length > 0 ? Math.round(scannedPlatforms.reduce((s, p) => s + p.mention_rate, 0) / scannedPlatforms.length * 10) / 10 : 0;
+
+  if (!authed) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a1a" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 32, fontWeight: 700, color: "#e0dfd6", marginBottom: 8 }}>AIO Tracker</div>
+          <div style={{ fontSize: 13, color: "#888", marginBottom: 24 }}>此頁面需要密碼才能存取</div>
+          <input
+            type="password"
+            placeholder="輸入密碼"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && pw === PASS) setAuthed(true); }}
+            style={{ padding: "10px 16px", fontSize: 15, borderRadius: 8, border: "1px solid #444", background: "#2a2a2a", color: "#e0dfd6", width: 220, outline: "none" }}
+          />
+          <div style={{ marginTop: 12 }}>
+            <button
+              onClick={() => { if (pw === PASS) setAuthed(true); }}
+              style={{ padding: "8px 24px", fontSize: 14, borderRadius: 8, border: "none", background: pw === PASS ? "#5dcaa5" : "#444", color: pw === PASS ? "#000" : "#888", cursor: "pointer", fontWeight: 600 }}
+            >進入</button>
+          </div>
+          {pw.length > 0 && pw !== PASS && <div style={{ color: "#f0997b", fontSize: 12, marginTop: 8 }}>密碼錯誤</div>}
+        </div>
+      </div>
+    );
+  }
   const bestPlatform = scannedPlatforms.length > 0 ? scannedPlatforms.reduce((a, b) => a.mention_rate > b.mention_rate ? a : b) : { platform: "—", mention_rate: 0 };
   const worstPlatform = scannedPlatforms.length > 0 ? scannedPlatforms.reduce((a, b) => a.mention_rate < b.mention_rate ? a : b) : { platform: "—", mention_rate: 0 };
 
